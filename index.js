@@ -2,113 +2,108 @@ const express = require('express');
 const { Telegraf } = require('telegraf');
 const { stringify } = require('csv-stringify/sync');
 
-// 1. WEB SERVER (Render Health Check ke liye)
+// 1. WEB SERVER
 const app = express();
 const PORT = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('<h1>📂 EXODUS CSV BUILDER: ONLINE</h1>'));
+app.get('/', (req, res) => res.send('<h1>🤖 CSV BOT: DEBUG MODE ONLINE</h1>'));
 app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
 
 // 2. BOT SETUP
-// Render Environment Variables mein 'BOT_TOKEN' daalna
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// TEMPORARY STORAGE (RAM)
-let leadStorage = {}; // Chat ID ke hisab se data store karega
+// MEMORY
+let leadStorage = {}; 
 
-// 3. LOGIC: JAB TU MESSAGE FORWARD KAREGA
+// LOGIC: DATA COLLECTION
 bot.on('text', async (ctx) => {
+    // 1. Check: Kya ye command hai? (/export) Agar haan, toh ignore karo yahan
+    if (ctx.message.text.startsWith('/')) return;
+
     const text = ctx.message.text;
     const userId = ctx.from.id;
 
-    // Initialize storage for user if not exists
     if (!leadStorage[userId]) leadStorage[userId] = [];
 
-    // DATA EXTRACTION (Regex Magic)
-    // Ye tere "Lead Bot" ke format ko padhne ke liye hai
-    const isLeadMsg = text.includes('Email:') || text.includes('GOD-TIER');
-    
-    if (isLeadMsg) {
-        try {
-            // Data nikalna (Icons aur text hatake)
-            // Format match: "📧 Email: something@gmail.com"
-            const name = text.match(/Name:\s*(.+)/i)?.[1]?.trim() || "N/A";
-            const email = text.match(/Email:\s*(.+)/i)?.[1]?.trim() || "N/A";
-            const phone = text.match(/Phone:\s*(.+)/i)?.[1]?.trim() || "N/A";
-            
-            // City aur Zip alag karna
-            const cityFull = text.match(/City:\s*(.+)/i)?.[1]?.trim() || "N/A";
-            const city = cityFull.split('(')[0].trim();
-            const zip = cityFull.match(/Zip:\s*(\d+|N\/A)/i)?.[1] || "N/A";
-            
-            const rating = text.match(/Rating:\s*(.+)/i)?.[1]?.trim() || "N/A";
+    // DEBUG LOG: Render console mein dikhega
+    console.log(`📩 Message received from ${userId}: ${text.substring(0, 20)}...`);
 
-            // Save to Memory
+    try {
+        // LOOSE REGEX (Icons, Stars, sab handle karega)
+        // Ye dhoondhta hai "Email:" ke baad kya likha hai, chahe icon ho ya na ho
+        const emailMatch = text.match(/(?:Email|📧).*?:\s*(.+)/i);
+        const nameMatch = text.match(/(?:Name|🏢).*?:\s*(.+)/i);
+        const phoneMatch = text.match(/(?:Phone|📞).*?:\s*(.+)/i);
+        const cityMatch = text.match(/(?:City|📍).*?:\s*(.+)/i);
+        const ratingMatch = text.match(/(?:Rating|⭐).*?:\s*(.+)/i);
+
+        // Agar Email mila, tabhi save karo
+        if (emailMatch && emailMatch[1]) {
+            const rawCity = cityMatch ? cityMatch[1].trim() : "N/A";
+            
             leadStorage[userId].push({
-                email: email, // 'email' header verification tool ke liye zaroori hai
-                name: name,
-                phone: phone,
-                city: city,
-                zip: zip,
-                rating: rating,
-                source: "Exodus Hunter"
+                email: emailMatch[1].trim(),
+                name: nameMatch ? nameMatch[1].trim() : "N/A",
+                phone: phoneMatch ? phoneMatch[1].trim() : "N/A",
+                city: rawCity.split('(')[0].trim(), // Zip code alag kar diya
+                rating: ratingMatch ? ratingMatch[1].trim() : "N/A"
             });
 
-            // Confirmation (Chupchap save karega, spam nahi karega)
-            // Agar spam hatana hai toh niche wali line hata dena
-            await ctx.reply(`✅ Saved. Total: ${leadStorage[userId].length} (Send /export to finish)`);
+            await ctx.reply(`✅ Added! (Bag: ${leadStorage[userId].length})`);
+        } else {
+            // Agar format match nahi hua
+            await ctx.reply("⚠️ Format samajh nahi aaya. Kya ye sahi Lead Message hai?");
+            console.log("❌ Regex failed on:", text);
+        }
 
-        } catch (e) {
-            console.log("Parsing Error", e);
-        }
-    } else {
-        // Agar normal message hai (Commands chhod ke)
-        if (!text.startsWith('/')) {
-            ctx.reply("❌ Bhai, ye Lead format nahi hai. Sahi message forward kar.");
-        }
+    } catch (e) {
+        console.error("Parsing Error:", e);
+        await ctx.reply(`❌ Parsing Error: ${e.message}`);
     }
 });
 
-// 4. COMMAND: CSV GENERATE KARO
+// COMMAND: EXPORT
 bot.command('export', async (ctx) => {
     const userId = ctx.from.id;
-    const leads = leadStorage[userId];
+    console.log(`📤 Export command received from ${userId}`);
 
-    if (!leads || leads.length === 0) {
-        return ctx.reply("📭 Bag khali hai! Pehle kuch leads forward karo.");
+    // SAFETY CHECK 1: Memory check
+    if (!leadStorage[userId] || leadStorage[userId].length === 0) {
+        return ctx.reply("📭 Bag khali hai! Ya toh bot restart hua hai, ya tumne kuch save nahi kiya.");
     }
 
     try {
-        ctx.reply("⚙️ Generating HQ CSV...");
+        await ctx.reply("⚙️ CSV bana raha hoon, 1 second...");
 
-        // Convert JSON to CSV
+        const leads = leadStorage[userId];
+        
+        // SAFETY CHECK 2: CSV Generation
         const csvData = stringify(leads, { header: true });
         
-        // Send File
-        const fileName = `HQ_Leads_${Date.now()}.csv`;
+        // SAFETY CHECK 3: Sending File
         await ctx.replyWithDocument({
             source: Buffer.from(csvData),
-            filename: fileName
-        }, { caption: `🚀 Ye lo bhai, ${leads.length} leads ready hain verification ke liye.` });
+            filename: `Exodus_Leads_${Date.now()}.csv`
+        }, { caption: `🚀 Ye lo bhai, ${leads.length} leads ready hain!` });
 
-        // Memory Clear (Taaki agla batch mix na ho)
+        // Memory Clear
         leadStorage[userId] = []; 
         
     } catch (e) {
-        ctx.reply(`🚨 Error: ${e.message}`);
+        console.error("Export Error:", e);
+        await ctx.reply(`🚨 Export Error: ${e.message}`);
     }
 });
 
-// COMMAND: MANUAL CLEAR
-bot.command('clear', (ctx) => {
-    const userId = ctx.from.id;
-    leadStorage[userId] = [];
-    ctx.reply("🗑️ Memory saaf kar di.");
+// COMMAND: DEBUG CHECK
+bot.command('check', (ctx) => {
+    ctx.reply("🟢 Bot Zinda Hai! Mujhe forward karo.");
 });
 
-// START
-bot.launch();
-console.log("🤖 CSV Builder Bot Started");
+// HANDLING CRASHES
+bot.catch((err, ctx) => {
+    console.log(`Ooops, encountered an error for ${ctx.updateType}`, err);
+    ctx.reply("🔥 Critical Error aa gaya internal system mein.");
+});
 
-// Graceful Stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+bot.launch();
+console.log("🤖 Debug Bot Started...");
