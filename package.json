@@ -1,18 +1,18 @@
 {
-  "name": "exodus-wealth-sniper",
-  "version": "2.0.0",
-  "description": "Exodus Trinity Engine: Hunter + Verifier + CSV Builder",
+  "name": "exodus-csv-builder",
+  "version": "1.0.0",
+  "description": "Forward Messages to CSV Converter",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "csv-stringify": "^6.4.5",
     "express": "^4.18.2",
-    "telegraf": "^4.15.0"
+    "telegraf": "^4.15.0",
+    "csv-stringify": "^6.4.5"
   },
   "engines": {
     "node": ">=18.0.0"
   }
 }
+
