@@ -1,22 +1,21 @@
 const express = require('express');
 const { Telegraf } = require('telegraf');
-const { stringify } = require('csv-stringify/sync');
 
 // 1. WEB SERVER
 const app = express();
 const PORT = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('<h1>🤖 CSV BOT: DEBUG MODE ONLINE</h1>'));
+app.get('/', (req, res) => res.send('<h1>🤖 EXODUS CSV MAKER: READY</h1>'));
 app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
 
 // 2. BOT SETUP
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// MEMORY
-let leadStorage = {}; 
+// MEMORY STORE
+let leadStorage = {};
 
-// LOGIC: DATA COLLECTION
+// 3. LOGIC: Message Receive
 bot.on('text', async (ctx) => {
-    // 1. Check: Kya ye command hai? (/export) Agar haan, toh ignore karo yahan
+    // Ignore commands
     if (ctx.message.text.startsWith('/')) return;
 
     const text = ctx.message.text;
@@ -24,86 +23,93 @@ bot.on('text', async (ctx) => {
 
     if (!leadStorage[userId]) leadStorage[userId] = [];
 
-    // DEBUG LOG: Render console mein dikhega
-    console.log(`📩 Message received from ${userId}: ${text.substring(0, 20)}...`);
+    // DATA EXTRACTION
+    // Loose Regex jo thoda messy data bhi utha lega
+    const emailMatch = text.match(/(?:Email|📧).*?:\s*(.+)/i);
+    const nameMatch = text.match(/(?:Name|🏢).*?:\s*(.+)/i);
+    const phoneMatch = text.match(/(?:Phone|📞).*?:\s*(.+)/i);
+    const cityMatch = text.match(/(?:City|📍).*?:\s*(.+)/i);
+    const ratingMatch = text.match(/(?:Rating|⭐).*?:\s*(.+)/i);
 
-    try {
-        // LOOSE REGEX (Icons, Stars, sab handle karega)
-        // Ye dhoondhta hai "Email:" ke baad kya likha hai, chahe icon ho ya na ho
-        const emailMatch = text.match(/(?:Email|📧).*?:\s*(.+)/i);
-        const nameMatch = text.match(/(?:Name|🏢).*?:\s*(.+)/i);
-        const phoneMatch = text.match(/(?:Phone|📞).*?:\s*(.+)/i);
-        const cityMatch = text.match(/(?:City|📍).*?:\s*(.+)/i);
-        const ratingMatch = text.match(/(?:Rating|⭐).*?:\s*(.+)/i);
+    if (emailMatch && emailMatch[1]) {
+        const rawCity = cityMatch ? cityMatch[1].trim() : "N/A";
+        const cityParts = rawCity.split('(');
+        const city = cityParts[0].trim();
+        const zip = rawCity.match(/Zip:\s*(\d+)/i)?.[1] || "N/A";
 
-        // Agar Email mila, tabhi save karo
-        if (emailMatch && emailMatch[1]) {
-            const rawCity = cityMatch ? cityMatch[1].trim() : "N/A";
-            
-            leadStorage[userId].push({
-                email: emailMatch[1].trim(),
-                name: nameMatch ? nameMatch[1].trim() : "N/A",
-                phone: phoneMatch ? phoneMatch[1].trim() : "N/A",
-                city: rawCity.split('(')[0].trim(), // Zip code alag kar diya
-                rating: ratingMatch ? ratingMatch[1].trim() : "N/A"
-            });
+        leadStorage[userId].push({
+            name: nameMatch ? nameMatch[1].trim() : "N/A",
+            email: emailMatch[1].trim(),
+            phone: phoneMatch ? phoneMatch[1].trim() : "N/A",
+            city: city,
+            zip: zip,
+            rating: ratingMatch ? ratingMatch[1].trim() : "N/A"
+        });
 
-            await ctx.reply(`✅ Added! (Bag: ${leadStorage[userId].length})`);
-        } else {
-            // Agar format match nahi hua
-            await ctx.reply("⚠️ Format samajh nahi aaya. Kya ye sahi Lead Message hai?");
-            console.log("❌ Regex failed on:", text);
-        }
-
-    } catch (e) {
-        console.error("Parsing Error:", e);
-        await ctx.reply(`❌ Parsing Error: ${e.message}`);
+        // Confirmation reply
+        await ctx.reply(`✅ Added! (Bag: ${leadStorage[userId].length})`);
+    } else {
+        await ctx.reply("⚠️ Email nahi mila. Format check karo.");
     }
 });
 
-// COMMAND: EXPORT
+// 4. COMMAND: EXPORT (DESI STYLE - NO CRASH)
 bot.command('export', async (ctx) => {
     const userId = ctx.from.id;
-    console.log(`📤 Export command received from ${userId}`);
+    console.log(`📤 Export requested by ${userId}`);
 
-    // SAFETY CHECK 1: Memory check
+    // Check Memory
     if (!leadStorage[userId] || leadStorage[userId].length === 0) {
-        return ctx.reply("📭 Bag khali hai! Ya toh bot restart hua hai, ya tumne kuch save nahi kiya.");
+        return ctx.reply("📭 Bag khali hai! Bot restart hua hoga ya tumne kuch add nahi kiya.");
     }
 
     try {
-        await ctx.reply("⚙️ CSV bana raha hoon, 1 second...");
+        await ctx.reply("⚙️ Converting to CSV...");
 
         const leads = leadStorage[userId];
-        
-        // SAFETY CHECK 2: CSV Generation
-        const csvData = stringify(leads, { header: true });
-        
-        // SAFETY CHECK 3: Sending File
+
+        // --- MANUAL CSV CREATION (100% Crash Proof) ---
+        // Header Row
+        let csvContent = "Name,Email,Phone,City,Zip,Rating\n";
+
+        // Data Rows
+        leads.forEach(lead => {
+            // Comma se bachne ke liye quotes lagaye (Sanitization)
+            const row = [
+                `"${lead.name}"`,
+                `"${lead.email}"`,
+                `"${lead.phone}"`,
+                `"${lead.city}"`,
+                `"${lead.zip}"`,
+                `"${lead.rating}"`
+            ].join(","); // Join with commas
+            
+            csvContent += row + "\n"; // Add new line
+        });
+        // ----------------------------------------------
+
+        // Send File
         await ctx.replyWithDocument({
-            source: Buffer.from(csvData),
-            filename: `Exodus_Leads_${Date.now()}.csv`
+            source: Buffer.from(csvContent, 'utf-8'),
+            filename: `HQ_Leads_${Date.now()}.csv`
         }, { caption: `🚀 Ye lo bhai, ${leads.length} leads ready hain!` });
 
-        // Memory Clear
+        // Clear Memory after sending
         leadStorage[userId] = []; 
-        
+        await ctx.reply("🧹 Memory cleared for next batch.");
+
     } catch (e) {
-        console.error("Export Error:", e);
-        await ctx.reply(`🚨 Export Error: ${e.message}`);
+        console.error("Export Failed:", e);
+        await ctx.reply(`🚨 Error aa gaya: ${e.message}`);
     }
 });
 
-// COMMAND: DEBUG CHECK
-bot.command('check', (ctx) => {
-    ctx.reply("🟢 Bot Zinda Hai! Mujhe forward karo.");
-});
+// COMMAND: CHECK
+bot.command('check', (ctx) => ctx.reply("🟢 System Online. Forward karo!"));
 
-// HANDLING CRASHES
-bot.catch((err, ctx) => {
-    console.log(`Ooops, encountered an error for ${ctx.updateType}`, err);
-    ctx.reply("🔥 Critical Error aa gaya internal system mein.");
+// ERROR HANDLING
+bot.catch((err) => {
+    console.log("Bot Error:", err);
 });
 
 bot.launch();
-console.log("🤖 Debug Bot Started...");
